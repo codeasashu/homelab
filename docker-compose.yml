@@ -1,0 +1,132 @@
+name: homelab
+
+networks:
+  homelab_net:
+    name: homelab_net
+    driver: bridge
+
+volumes:
+  model-cache:
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: homelab-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    networks:
+      - homelab_net
+
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-release}
+    volumes:
+      - ${IMMICH_UPLOAD_LOCATION}:/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    ports:
+      - '2283:2283'
+    depends_on:
+      - redis
+      - database
+    restart: always
+    healthcheck:
+      disable: false
+    networks:
+      - homelab_net
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-release}
+    volumes:
+      - model-cache:/cache
+    env_file:
+      - .env
+    restart: always
+    healthcheck:
+      disable: false
+    networks:
+      - homelab_net
+  redis:
+    container_name: immich_redis
+    image: docker.io/valkey/valkey:9@sha256:fb8d272e529ea567b9bf1302245796f21a2672b8368ca3fcb938ac334e613c8f
+    healthcheck:
+      test: redis-cli ping || exit 1
+    restart: always
+    networks:
+      - homelab_net
+
+  database:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    environment:
+      POSTGRES_PASSWORD: ${IMMICH_DB_PASSWORD}
+      POSTGRES_USER: ${IMMICH_DB_USERNAME}
+      POSTGRES_DB: ${IMMICH_DB_DATABASE_NAME}
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      # Do not edit the next line. If you want to change the database storage location on your system, edit the value of DB_DATA_LOCATION in the .env file
+      - ${IMMICH_DB_DATA_LOCATION}:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: always
+    networks:
+      - homelab_net
+
+  plex:
+    container_name: plex
+    image: plexinc/pms-docker:latest
+    restart: unless-stopped
+    network_mode: host
+
+    environment:
+      - TZ=Asia/Kolkata
+      - PLEX_CLAIM=${PLEX_CLAIM}
+      - ADVERTISE_IP=http://plex.homelab.lan
+      - PUID=1000
+      - PGID=1000
+
+    volumes:
+      - ./plex/config:/config
+      - ./plex/transcode:/transcode
+      - /mnt/primary/Movies:/movies
+      - /mnt/primary/Series:/shows
+      - /mnt/primary/Private:/adult
+      - /mnt/primary/torrents:/torrents
+
+  # nextcloud:
+  #   image: nextcloud:${NEXTCLOUD_VERSION:-stable-fpm}
+  #   restart: unless-stopped
+  #   user: 1000:1000
+  #   depends_on:
+  #     database:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   environment:
+  #     - POSTGRES_DB=${NEXTCLOUD_POSTGRES_DB:-nextcloud}
+  #     - POSTGRES_USER=${NEXTCLOUD_POSTGRES_USER:-nextcloud}
+  #     - POSTGRES_PASSWORD=${NEXTCLOUD_POSTGRES_PASSWORD:-12345678}
+  #     - POSTGRES_HOST=database
+  #     - PHP_UPLOAD_LIMIT=10G
+  #     - PHP_MEMORY_LIMIT=1G
+  #     - TRUSTED_PROXIES=192.168.0.0/24,172.16.0.0/24
+  #     - NEXTCLOUD_DATA_DIR=/nextcloud-data
+  #     - NEXTCLOUD_ADMIN_USER=${NEXTCLOUD_ADMIN_USER:-admin}
+  #     - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD:-admin}
+  #     - REDIS_HOST=redis
+
+  #   volumes:
+  #     - ./nextcloud/html:/var/www/html
+  #     - ./nextcloud/apps:/var/www/html/custom_apps
+  #     # if another location is not desired for data:
+  #     # ./data:/var/www/html/data
+  #     - ./nextcloud/data:/nextcloud-data
+  #     - ./nextcloud/config:/var/www/html/config
+  #     # https://github.com/nextcloud/docker/issues/182
+  #     # - ./nextcloud/redis-session.ini:/usr/local/etc/php/conf.d/redis-session.ini
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - /etc/timezone:/etc/timezone:ro
