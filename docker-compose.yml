@@ -97,36 +97,71 @@ services:
       - /mnt/primary/Private:/adult
       - /mnt/primary/torrents:/torrents
 
-  # nextcloud:
-  #   image: nextcloud:${NEXTCLOUD_VERSION:-stable-fpm}
-  #   restart: unless-stopped
-  #   user: 1000:1000
-  #   depends_on:
-  #     database:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   environment:
-  #     - POSTGRES_DB=${NEXTCLOUD_POSTGRES_DB:-nextcloud}
-  #     - POSTGRES_USER=${NEXTCLOUD_POSTGRES_USER:-nextcloud}
-  #     - POSTGRES_PASSWORD=${NEXTCLOUD_POSTGRES_PASSWORD:-12345678}
-  #     - POSTGRES_HOST=database
-  #     - PHP_UPLOAD_LIMIT=10G
-  #     - PHP_MEMORY_LIMIT=1G
-  #     - TRUSTED_PROXIES=192.168.0.0/24,172.16.0.0/24
-  #     - NEXTCLOUD_DATA_DIR=/nextcloud-data
-  #     - NEXTCLOUD_ADMIN_USER=${NEXTCLOUD_ADMIN_USER:-admin}
-  #     - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD:-admin}
-  #     - REDIS_HOST=redis
+  mariadb:
+    image: mariadb:10.11
+    container_name: seafile-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=db_dev  # Required, set the root's password of MySQL service.
+      - MYSQL_LOG_CONSOLE=true
+      - MARIADB_AUTO_UPGRADE=1
+    volumes:
+      - ./seafile/mysql:/var/lib/mysql  # Required, specifies the path to MySQL data persistent store.
+    networks:
+      - homelab_net
 
-  #   volumes:
-  #     - ./nextcloud/html:/var/www/html
-  #     - ./nextcloud/apps:/var/www/html/custom_apps
-  #     # if another location is not desired for data:
-  #     # ./data:/var/www/html/data
-  #     - ./nextcloud/data:/nextcloud-data
-  #     - ./nextcloud/config:/var/www/html/config
-  #     # https://github.com/nextcloud/docker/issues/182
-  #     # - ./nextcloud/redis-session.ini:/usr/local/etc/php/conf.d/redis-session.ini
-  #     - /etc/localtime:/etc/localtime:ro
-  #     - /etc/timezone:/etc/timezone:ro
+  memcached:
+    image: memcached:1.6.18
+    container_name: seafile-memcached
+    entrypoint: memcached -m 256
+    networks:
+      - homelab_net
+
+  seafile:
+    image: seafileltd/seafile-mc:11.0-latest
+    container_name: seafile
+    ports:
+      - "8081:80"
+#     - "443:443"  # If https is enabled, cancel the comment.
+    volumes:
+      - /mnt/primary/seafile:/shared   # Required, specifies the path to Seafile data persistent store.
+    environment:
+      - DB_HOST=mariadb
+      - DB_ROOT_PASSWD=db_dev  # Required, the value should be root's password of MySQL service.
+      - TIME_ZONE=Etc/UTC  # Optional, default is UTC. Should be uncomment and set to your local time zone.
+      - SEAFILE_ADMIN_EMAIL=admin@localhost # Specifies Seafile admin user, default is 'me@example.com'.
+      - SEAFILE_ADMIN_PASSWORD=asecret     # Specifies Seafile admin password, default is 'asecret'.
+      - SEAFILE_SERVER_LETSENCRYPT=false   # Whether to use https or not.
+      - SEAFILE_SERVER_HOSTNAME=cloud.homelab.lan
+    depends_on:
+      - mariadb
+      - memcached
+    networks:
+      - homelab_net
+
+  radicale:
+    image: tomsquest/docker-radicale
+    container_name: radicale
+    ports:
+      - 5232:5232
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - KILL
+    healthcheck:
+      test: curl -f http://127.0.0.1:5232 || exit 1
+      interval: 30s
+      retries: 3
+    restart: unless-stopped
+    volumes:
+      - /mnt/primary/radicale:/data
+    networks:
+      - homelab_net
+    environment:
+      UID: 1000
+      GID: 1000
