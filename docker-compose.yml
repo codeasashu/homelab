@@ -123,7 +123,7 @@ services:
       - "8081:80"
 #     - "443:443"  # If https is enabled, cancel the comment.
     volumes:
-      - /mnt/primary/seafile:/shared   # Required, specifies the path to Seafile data persistent store.
+      - /mnt/primary/seafile/shared:/shared   # Required, specifies the path to Seafile data persistent store.
     environment:
       - DB_HOST=mariadb
       - DB_ROOT_PASSWD=db_dev  # Required, the value should be root's password of MySQL service.
