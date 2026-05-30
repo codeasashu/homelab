@@ -4,12 +4,12 @@ This repository contains the complete configuration for a **self-hosted homelab*
 
 It provides:
 
-* Photo management (Immich)
-* Media streaming (Plex)
-* Personal cloud storage (Seafile)
-* Calendar & contacts (Radicale)
-* Reverse proxy (NGINX)
-* Full data redundancy via rsync-based backups
+- Photo management (Immich)
+- Media streaming (Plex)
+- Personal cloud storage (Seafile)
+- Calendar & contacts (Radicale)
+- Reverse proxy (NGINX)
+- Full data redundancy via rsync-based backups
 
 The system is designed to be **safe against accidental data loss**, **power failures**, and **disk unplug events**.
 
@@ -34,11 +34,13 @@ The system is designed to be **safe against accidental data loss**, **power fail
 └────────────────┘                    └────────────────┘
 ```
 
+
 | Layer           | Purpose                   |
 | --------------- | ------------------------- |
 | **SSD**         | OS, Docker, configs, logs |
 | **Primary HDD** | All live service data     |
 | **Backup HDD**  | Nightly rsync mirror      |
+
 
 ---
 
@@ -46,11 +48,13 @@ The system is designed to be **safe against accidental data loss**, **power fail
 
 Defined in `/etc/fstab`:
 
+
 | Mount          | Purpose          | Options               |
 | -------------- | ---------------- | --------------------- |
 | `/`            | OS               | ext4                  |
 | `/mnt/primary` | All homelab data | ext4, noatime         |
 | `/mnt/backup`  | Backup drive     | ext4, noatime, nofail |
+
 
 The backup disk is allowed to be unplugged (`nofail`) without breaking boot.
 
@@ -59,6 +63,7 @@ The backup disk is allowed to be unplugged (`nofail`) without breaking boot.
 ## 🐳 Services
 
 All services run in a single Docker Compose stack:
+
 
 | Service    | Purpose          | Storage                          |
 | ---------- | ---------------- | -------------------------------- |
@@ -70,6 +75,7 @@ All services run in a single Docker Compose stack:
 | Radicale   | CalDAV / CardDAV | `/mnt/primary/radicale`          |
 | Redis      | Immich cache     | ephemeral                        |
 | NGINX      | Reverse proxy    | SSD                              |
+
 
 Plex runs in `host` mode for DLNA and Chromecast compatibility.
 
@@ -115,10 +121,12 @@ This prevents rsync from writing to `/mnt/backup` when the USB disk is unplugged
 
 Databases are dumped live from containers:
 
+
 | App     | Command     |
 | ------- | ----------- |
 | Immich  | `pg_dump`   |
 | Seafile | `mysqldump` |
+
 
 They are written into `/mnt/primary` so they are also backed up.
 
@@ -134,10 +142,10 @@ rsync -avp
 
 This preserves:
 
-* Ownership
-* Permissions
-* Timestamps
-* Symlinks
+- Ownership
+- Permissions
+- Timestamps
+- Symlinks
 
 Result:
 
@@ -163,6 +171,7 @@ Logs allow forensic verification of every backup run.
 
 This system prevents all common failure modes:
 
+
 | Risk              | Protection                       |
 | ----------------- | -------------------------------- |
 | USB unplugged     | Backup aborts                    |
@@ -170,6 +179,7 @@ This system prevents all common failure modes:
 | Corrupt DB        | Logical SQL dumps                |
 | Docker bug        | Data stored outside containers   |
 | Accidental delete | Backup mirror                    |
+
 
 ---
 
@@ -189,11 +199,11 @@ Plex uses host networking to allow DLNA discovery.
 
 This homelab is designed like a **small system**:
 
-* **Stateless containers**
-* **Stateful volumes on real disks**
-* **Crash-safe backups**
-* **Mount-verified writes**
-* **No single point of silent failure**
+- **Stateless containers**
+- **Stateful volumes on real disks**
+- **Crash-safe backups**
+- **Mount-verified writes**
+- **No single point of silent failure**
 
 It behaves more like a NAS + application cluster than a hobby setup.
 
@@ -237,8 +247,8 @@ docker exec -i immich_postgres psql -U postgres immich < db.sql
 
 ## 🏁 TODO
 
-* Wireguard Tunnel Setup
-* Disaster recovery
+- Wireguard Tunnel Setup
+- Disaster recovery
+- adding snapshotting (btrfs or zfs)
+- or off-site encrypted sync to cloud / another machine
 
-* adding snapshotting (btrfs or zfs)
-* or off-site encrypted sync to cloud / another machine

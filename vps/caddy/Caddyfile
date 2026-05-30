@@ -1,0 +1,75 @@
+hello.codeasashu.in.eu.org {
+    respond "Hello from Caddy"
+}
+
+home.codeasashu.in.eu.org {
+    log {
+        output stdout
+        format console
+    }
+
+    @blocked not remote_ip 146.56.50.117
+    respond @blocked 403
+
+    reverse_proxy 10.66.66.2:3000
+}
+
+uptime.codeasashu.in.eu.org {
+    log {
+        output stdout
+        format console
+    }
+
+    @blocked not remote_ip 146.56.50.117
+    respond @blocked 403
+
+    reverse_proxy 10.66.66.2:3001
+}
+
+media.codeasashu.in.eu.org {
+
+    reverse_proxy 10.66.66.2:8096
+
+    encode gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000;"
+    }
+}
+
+photos.codeasashu.in.eu.org {
+    log {
+        output stdout
+        format console
+    }
+
+    @blocked not remote_ip 146.56.50.117
+    respond @blocked 403
+
+    reverse_proxy 10.66.66.2:2283
+}
+
+
+music.codeasashu.in.eu.org {
+    log {
+        output stdout
+        format console
+    }
+
+    @blocked not remote_ip 146.56.50.117
+    respond @blocked 403
+
+    reverse_proxy 10.66.66.2:4533
+}
+
+files.codeasashu.in.eu.org {
+    log {
+        output stdout
+        format console
+    }
+
+    @blocked not remote_ip 146.56.50.117
+    respond @blocked 403
+
+    reverse_proxy 10.66.66.2:8081
+}
