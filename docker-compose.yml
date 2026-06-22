@@ -9,6 +9,41 @@ volumes:
   model-cache:
 
 services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:v1.13.2
+    container_name: homepage
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./homepage:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: codeasashu.in.eu.org,192.168.1.12:3000,10.66.66.2:3000,localhost:3000,homepage:3000
+    networks:
+      - homelab_net
+    labels:
+      - homepage.group=🛠 Infrastructure
+      - homepage.name=Homepage
+      - homepage.icon=homepage.png
+      - homepage.href=https://codeasashu.in.eu.org
+      - homepage.description=Dashboard
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    restart: unless-stopped
+    volumes:
+      - ./uptime_kuma:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "3001:3001"
+    networks:
+      - homelab_net
+    labels:
+      - homepage.group=🛠 Infrastructure
+      - homepage.name=Uptime Kuma
+      - homepage.icon=uptime-kuma.png
+      - homepage.href=http://192.168.1.12:3001
+      - homepage.description=Monitoring
   nginx:
     image: nginx:alpine
     container_name: homelab-nginx
@@ -38,6 +73,14 @@ services:
       disable: false
     networks:
       - homelab_net
+    labels:
+      - homepage.group=📸 Family
+      - homepage.name=Immich
+      - homepage.icon=immich.png
+      - homepage.href=http://192.168.1.12:2283
+      - homepage.description=Photos & Videos
+      - homepage.widget.type=immich
+      - homepage.widget.url=http://immich-server:2283
 
   immich-machine-learning:
     container_name: immich_machine_learning
@@ -75,27 +118,6 @@ services:
     restart: always
     networks:
       - homelab_net
-
-  plex:
-    container_name: plex
-    image: plexinc/pms-docker:latest
-    restart: unless-stopped
-    network_mode: host
-
-    environment:
-      - TZ=Asia/Kolkata
-      - PLEX_CLAIM=${PLEX_CLAIM}
-      - ADVERTISE_IP=http://plex.homelab.lan
-      - PUID=1000
-      - PGID=1000
-
-    volumes:
-      - ./plex/config:/config
-      - ./plex/transcode:/transcode
-      - /mnt/primary/Movies:/movies
-      - /mnt/primary/Series:/shows
-      - /mnt/primary/Private:/adult
-      - /mnt/primary/torrents:/torrents
 
   mariadb:
     image: mariadb:10.11
@@ -137,31 +159,307 @@ services:
       - memcached
     networks:
       - homelab_net
+    labels:
+      - homepage.group=📸 Family
+      - homepage.name=Seafile
+      - homepage.icon=seafile.png
+      - homepage.href=http://192.168.1.12:8081
+      - homepage.description=Documents & Files
 
-  radicale:
-    image: tomsquest/docker-radicale
-    container_name: radicale
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    user: 1000:1000
     ports:
-      - 5232:5232
-    init: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - SETUID
-      - SETGID
-      - CHOWN
-      - KILL
-    healthcheck:
-      test: curl -f http://127.0.0.1:5232 || exit 1
-      interval: 30s
-      retries: 3
+      - "4533:4533"
     restart: unless-stopped
-    volumes:
-      - /mnt/primary/radicale:/data
     networks:
       - homelab_net
     environment:
-      UID: 1000
-      GID: 1000
+      ND_BACKUP_PATH: /data/backup
+      ND_BACKUP_SCHEDULE: "0 1 * * *"
+      ND_BACKUP_COUNT: 3
+    volumes:
+      - "./navidrome:/data:z"
+      - "/mnt/primary/Music:/music:ro"
+    labels:
+      - homepage.group=🎬 Media
+      - homepage.name=Navidrome
+      - homepage.icon=navidrome.png
+      - homepage.href=http://192.168.1.12:4533
+      - homepage.description=Music Streaming
+
+  jellyfin:
+    image: jellyfin/jellyfin:10.11.11
+    container_name: jellyfin
+    user: 1000:1000
+    devices:
+      - /dev/dri:/dev/dri
+    ports:
+      - 8096:8096/tcp
+      - 7359:7359/udp
+    volumes:
+      - ./jellyfin/config:/config
+      - ./jellyfin/cache:/cache
+      - type: bind
+        source: /mnt/primary/Movies
+        target: /movies
+      - type: bind
+        source: /mnt/primary/Series
+        target: /shows
+        read_only: true
+      # - type: bind
+      #   source: /mnt/primary/Personal
+      #   target: /personal
+      #   read_only: true
+      # - type: bind
+      #   source: /mnt/primary/torrents
+      #   target: /torrents
+      #   read_only: true
+    restart: 'unless-stopped'
+    # Optional - alternative address used for autodiscovery
+    environment:
+      - JELLYFIN_PublishedServerUrl=https://media.codeasashu.in.eu.org
+    networks:
+      - homelab_net
+    labels:
+      - homepage.group=🎬 Media
+      - homepage.name=Jellyfin
+      - homepage.icon=jellyfin.png
+      - homepage.href=https://media.codeasashu.in.eu.org
+      - homepage.description=Movies & TV Shows
+      - homepage.widget.type=jellyfin
+      - homepage.widget.url=http://jellyfin:8096
+      - homepage.widget.key=${HOMEPAGE_JELLYFIN_API_KEY}
+      - homepage.widget.version=2
+      - homepage.widget.enableBlocks=true
+      - homepage.widget.enableNowPlaying=true
+      - homepage.widget.enableMediaControl=true
+      - homepage.widget.showEpisodeNumber=true
+      - homepage.widget.expandOneStreamToTwoRows=true
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:4.0.17
+    container_name: sonarr
+    user: "1000:1000"
+    environment:
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./sonarr:/config
+      - /mnt/primary:/data
+    ports:
+      - "8989:8989"
+    restart: unless-stopped
+    networks:
+      - homelab_net
+    labels:
+      - homepage.group=⬇️ Automation
+      - homepage.name=Sonarr
+      - homepage.icon=sonarr.png
+      - homepage.href=http://192.168.1.12:8989
+      - homepage.description=TV Automation
+  radarr:
+    image: lscr.io/linuxserver/radarr:6.2.1
+    container_name: radarr
+    user: "1000:1000"
+    environment:
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./radarr:/config
+      - /mnt/primary:/data
+    ports:
+      - "7878:7878"
+    restart: unless-stopped
+    networks:
+      - homelab_net
+    labels:
+      - homepage.group=⬇️ Automation
+      - homepage.name=Radarr
+      - homepage.icon=radarr.png
+      - homepage.href=http://192.168.1.12:7878
+      - homepage.description=Movie Automation
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.2.2
+    container_name: qbittorrent
+    user: "1000:1000"
+    environment:
+      - TZ=Asia/Kolkata
+      - WEBUI_PORT=8080
+    volumes:
+      - ./qbittorrent:/config
+      - /mnt/primary/Downloads:/data/Downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    restart: unless-stopped
+    networks:
+      - homelab_net
+    labels:
+      - homepage.group=⬇️ Automation
+      - homepage.name=qBittorrent
+      - homepage.icon=qbittorrent.png
+      - homepage.href=http://192.168.1.12:8080
+      - homepage.description=Downloads
+
+  backrest:
+    image: ghcr.io/garethgeorge/backrest:v1.13.0-alpine
+    container_name: backrest
+    hostname: backrest
+    volumes:
+      - ./backrest/data:/data
+      - ./backrest/config:/config
+      - ./backrest/cache:/cache
+      - ./backrest/tmp:/tmp
+      - ./backrest/rclone:/root/.config/rclone # Mount for rclone config (needed when using rclone remotes)
+
+      - /mnt/primary/immich:/userdata/immich:ro
+      - /mnt/primary/Memories:/userdata/memories:ro
+      - /mnt/primary/Books:/userdata/books:ro
+      - /mnt/primary/docs:/userdata/docs:ro
+      - /mnt/primary/seafile:/userdata/seafile:ro
+      - /home/ashutosh/homelab:/userdata/homelab:ro
+
+      - /mnt/backup:/repos     # Mount local repos (optional for remote storage)
+    environment:
+      - BACKREST_DATA=/data
+      - BACKREST_CONFIG=/config/config.json
+      - XDG_CACHE_HOME=/cache
+      - TMPDIR=/tmp
+      - TZ=Asia/Kolkata
+      - RESTIC_REPOSITORY=/backup/restic
+      - RESTIC_PASSWORD=${RESTIC_PASSWORD}
+    ports:
+      - "9898:9898"
+    restart: unless-stopped
+    networks:
+      - homelab_net 
+    labels:
+      - homepage.group=🛠 Infrastructure
+      - homepage.name=Backrest
+      - homepage.icon=restic.png
+      - homepage.description=Nightly Backups
+
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PG_PASS:-postgres}
+    healthcheck:
+      interval: 30s
+      retries: 5
+      start_period: 20s
+      test:
+      - CMD-SHELL
+      - pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - homelab_net
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG:-2026.5.3}
+    container_name: authentik-server
+    restart: unless-stopped
+    command: server
+    shm_size: 512mb
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-CHANGE_ME_TO_A_LONG_RANDOM_STRING}
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: postgres
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS:-postgres}
+    ports:
+      - "9000:9000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./authentik/server/data:/data
+      - ./authentik/server/custom-templates:/templates
+    networks:
+      - homelab_net
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG:-2026.5.3}
+    container_name: authentik-worker
+    restart: unless-stopped
+    command: worker
+    shm_size: 512mb
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-CHANGE_ME_TO_A_LONG_RANDOM_STRING}
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: postgres
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./authentik/worker/data:/data
+      - ./authentik/worker/certs:/certs
+      - ./authentik/worker/custom-templates:/templates
+    networks:
+      - homelab_net
+
+  linkwarden:
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:${PG_PASS:-postgres}@postgres:5432/linkwarden
+    restart: always
+    image: ghcr.io/linkwarden/linkwarden:v2.14.1
+    ports:
+      - 3002:3000
+    volumes:
+      - ./linkwarden:/data/data
+    depends_on:
+      - postgres
+      - meilisearch
+    networks:
+      - homelab_net
+    labels:
+      - homepage.group=⬇️ Utility
+      - homepage.name=LinkWarden
+      - homepage.icon=linkwarden.png
+      - homepage.href=http://192.168.1.12:3002
+      - homepage.description=Bookmark
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12.8
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./meilisearch:/meili_data
+    networks:
+      - homelab_net
+
+  calibre-web:
+    image: lscr.io/linuxserver/calibre-web:latest
+    container_name: calibre-web
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - DOCKER_MODS=linuxserver/mods:universal-calibre #optional
+      - OAUTHLIB_RELAX_TOKEN_SCOPE=1 #optional
+    volumes:
+      - ./calibre/web/data:/config
+      - ./calibre/library:/books
+    ports:
+      - 8083:8083
+    restart: unless-stopped
+    networks:
+      - homelab_net
+    labels:
+      - homepage.group=⬇️ Reading
+      - homepage.name=Calibre
+      - homepage.icon=calibre.png
+      - homepage.href=http://192.168.1.12:8083
+      - homepage.description=Reader
