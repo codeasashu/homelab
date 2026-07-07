@@ -1,5 +1,15 @@
 name: homelab
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Access model (see .env / .env.example):
+#   Daily driver is LAN-by-IP  →  http://${LAN_IP:-192.168.1.12}:<port>   (static 192.168.1.12)
+#   Canonical identity for origin-bound services (pocket-id passkeys, Seafile,
+#   Jellyfin) is the OWNED domain ${PUBLIC_DOMAIN:-codeasashu.in.eu.org} — stable across Tailscale/
+#   Headscale renames. Point that domain at the LAN IP / VPS / Headscale via DNS
+#   without ever editing this file.
+#   Nothing here depends on a specific Tailscale MagicDNS name.
+# ─────────────────────────────────────────────────────────────────────────────
+
 networks:
   homelab_net:
     name: homelab_net
@@ -19,17 +29,19 @@ services:
       - ./homepage:/app/config
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      HOMEPAGE_ALLOWED_HOSTS: codeasashu.in.eu.org,192.168.1.12:3000,10.66.66.2:3000,localhost:3000,homepage:3000,.tailf65211.ts.net:3000
+      HOMEPAGE_ALLOWED_HOSTS: ${PUBLIC_DOMAIN:-codeasashu.in.eu.org},${LAN_IP:-192.168.1.12}:3000,localhost:3000,homepage:3000
     networks:
       - homelab_net
     labels:
       - homepage.group=🛠 Infrastructure
       - homepage.name=Homepage
       - homepage.icon=homepage.png
-      - homepage.href=https://codeasashu.in.eu.org
+      - homepage.href=https://${PUBLIC_DOMAIN:-codeasashu.in.eu.org}
       - homepage.description=Dashboard
+
   uptime-kuma:
     image: louislam/uptime-kuma:2
+    container_name: uptime-kuma
     restart: unless-stopped
     volumes:
       - ./uptime_kuma:/app/data
@@ -42,8 +54,9 @@ services:
       - homepage.group=🛠 Infrastructure
       - homepage.name=Uptime Kuma
       - homepage.icon=uptime-kuma.png
-      - homepage.href=http://192.168.1.12:3001
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:3001
       - homepage.description=Monitoring
+
   nginx:
     image: nginx:alpine
     container_name: homelab-nginx
@@ -65,7 +78,7 @@ services:
     env_file:
       - .env
     ports:
-      - '2283:2283'
+      - "2283:2283"
     depends_on:
       - redis
       - database
@@ -78,7 +91,7 @@ services:
       - homepage.group=📸 Family
       - homepage.name=Immich
       - homepage.icon=immich.png
-      - homepage.href=http://192.168.1.12:2283
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:2283
       - homepage.description=Photos & Videos
       - homepage.widget.type=immich
       - homepage.widget.url=http://immich-server:2283
@@ -97,6 +110,7 @@ services:
       disable: false
     networks:
       - homelab_net
+
   redis:
     container_name: immich_redis
     image: docker.io/valkey/valkey:9@sha256:fb8d272e529ea567b9bf1302245796f21a2672b8368ca3fcb938ac334e613c8f
@@ -113,7 +127,7 @@ services:
       POSTGRES_PASSWORD: ${IMMICH_DB_PASSWORD}
       POSTGRES_USER: ${IMMICH_DB_USERNAME}
       POSTGRES_DB: ${IMMICH_DB_DATABASE_NAME}
-      POSTGRES_INITDB_ARGS: '--data-checksums'
+      POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       # Do not edit the next line. If you want to change the database storage location on your system, edit the value of DB_DATA_LOCATION in the .env file
       - ${IMMICH_DB_DATA_LOCATION}:/var/lib/postgresql/data
@@ -132,7 +146,7 @@ services:
       - MARIADB_USER=seafile
       - MARIADB_PASSWORD=${SEAFILE_MYSQL_DB_PASSWORD:?Variable is not set or empty}
     volumes:
-      - ./seafile/mysql:/var/lib/mysql  # Required, specifies the path to MySQL data persistent store.
+      - ./seafile/mysql:/var/lib/mysql # Required, specifies the path to MySQL data persistent store.
     networks:
       - homelab_net
     healthcheck:
@@ -155,9 +169,8 @@ services:
     restart: unless-stopped
     ports:
       - "8081:80"
-#     - "443:443"  # If https is enabled, cancel the comment.
     volumes:
-      - /mnt/primary/seafile/shared:/shared   # Required, specifies the path to Seafile data persistent store.
+      - /mnt/primary/seafile/shared:/shared # Required, specifies the path to Seafile data persistent store.
     environment:
       - SEAFILE_MYSQL_DB_HOST=mariadb
       - SEAFILE_MYSQL_DB_PORT=3306
@@ -167,7 +180,7 @@ services:
       - SEAFILE_MYSQL_DB_CCNET_DB_NAME=ccnet_db
       - SEAFILE_MYSQL_DB_SEAFILE_DB_NAME=seafile_db
       - SEAFILE_MYSQL_DB_SEAHUB_DB_NAME=seahub_db
-      - TIME_ZONE=Asia/Kolkata
+      - TIME_ZONE=${TZ:-Asia/Kolkata}
       - INIT_SEAFILE_ADMIN_EMAIL=${INIT_SEAFILE_ADMIN_EMAIL:-me@example.com}
       - INIT_SEAFILE_ADMIN_PASSWORD=${INIT_SEAFILE_ADMIN_PASSWORD:-asecret}
       - SEAFILE_SERVER_HOSTNAME=${SEAFILE_SERVER_HOSTNAME:?Variable is not set or empty}
@@ -194,7 +207,7 @@ services:
       - ENABLE_METADATA_MANAGEMENT=${ENABLE_METADATA_MANAGEMENT:-false}
       - INNER_METADATA_SERVER_URL=${INNER_METADATA_SERVER_URL:-http://seafile-md-server:8084}
       - MD_FILE_COUNT_LIMIT=${MD_FILE_COUNT_LIMIT:-100000}
-      - CSRF_TRUSTED_ORIGINS=codeasashu.in.eu.org,192.168.1.12:3000,10.66.66.2:3000,localhost:3000,homepage:3000
+      - CSRF_TRUSTED_ORIGINS=${PUBLIC_DOMAIN:-codeasashu.in.eu.org},${LAN_IP:-192.168.1.12}:3000,${SEAFILE_CSRF_TRUSTED_ORIGINS},localhost:3000,homepage:3000
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:80 || exit 1"]
       interval: 30s
@@ -212,13 +225,13 @@ services:
       - homepage.group=📸 Family
       - homepage.name=Seafile
       - homepage.icon=seafile.png
-      - homepage.href=http://192.168.1.12:8081
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:8081
       - homepage.description=Documents & Files
 
   navidrome:
     image: deluan/navidrome:latest
     container_name: navidrome
-    user: 1000:1000
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "4533:4533"
     restart: unless-stopped
@@ -235,13 +248,13 @@ services:
       - homepage.group=🎬 Media
       - homepage.name=Navidrome
       - homepage.icon=navidrome.png
-      - homepage.href=http://192.168.1.12:4533
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:4533
       - homepage.description=Music Streaming
 
   jellyfin:
     image: jellyfin/jellyfin:10.11.11
     container_name: jellyfin
-    user: 1000:1000
+    user: "${PUID:-1000}:${PGID:-1000}"
     devices:
       - /dev/dri:/dev/dri
     ports:
@@ -265,17 +278,17 @@ services:
       #   source: /mnt/primary/torrents
       #   target: /torrents
       #   read_only: true
-    restart: 'unless-stopped'
+    restart: "unless-stopped"
     # Optional - alternative address used for autodiscovery
     environment:
-      - JELLYFIN_PublishedServerUrl=https://media.codeasashu.in.eu.org
+      - JELLYFIN_PublishedServerUrl=https://media.${PUBLIC_DOMAIN:-codeasashu.in.eu.org}
     networks:
       - homelab_net
     labels:
       - homepage.group=🎬 Media
       - homepage.name=Jellyfin
       - homepage.icon=jellyfin.png
-      - homepage.href=https://media.codeasashu.in.eu.org
+      - homepage.href=https://media.${PUBLIC_DOMAIN:-codeasashu.in.eu.org}
       - homepage.description=Movies & TV Shows
       - homepage.widget.type=jellyfin
       - homepage.widget.url=http://jellyfin:8096
@@ -290,9 +303,9 @@ services:
   sonarr:
     image: lscr.io/linuxserver/sonarr:4.0.17
     container_name: sonarr
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
-      - TZ=Asia/Kolkata
+      - TZ=${TZ:-Asia/Kolkata}
     volumes:
       - ./sonarr:/config
       - /mnt/primary:/data
@@ -305,14 +318,15 @@ services:
       - homepage.group=⬇️ Automation
       - homepage.name=Sonarr
       - homepage.icon=sonarr.png
-      - homepage.href=http://192.168.1.12:8989
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:8989
       - homepage.description=TV Automation
+
   radarr:
     image: lscr.io/linuxserver/radarr:6.2.1
     container_name: radarr
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
-      - TZ=Asia/Kolkata
+      - TZ=${TZ:-Asia/Kolkata}
     volumes:
       - ./radarr:/config
       - /mnt/primary:/data
@@ -325,15 +339,15 @@ services:
       - homepage.group=⬇️ Automation
       - homepage.name=Radarr
       - homepage.icon=radarr.png
-      - homepage.href=http://192.168.1.12:7878
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:7878
       - homepage.description=Movie Automation
 
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:5.2.2
     container_name: qbittorrent
-    user: "1000:1000"
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
-      - TZ=Asia/Kolkata
+      - TZ=${TZ:-Asia/Kolkata}
       - WEBUI_PORT=8080
     volumes:
       - ./qbittorrent:/config
@@ -349,7 +363,7 @@ services:
       - homepage.group=⬇️ Automation
       - homepage.name=qBittorrent
       - homepage.icon=qbittorrent.png
-      - homepage.href=http://192.168.1.12:8080
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:8080
       - homepage.description=Downloads
 
   backrest:
@@ -370,24 +384,25 @@ services:
       - /mnt/primary/seafile:/userdata/seafile:ro
       - /home/ashutosh/homelab:/userdata/homelab:ro
 
-      - /mnt/backup:/repos     # Mount local repos (optional for remote storage)
+      - /mnt/backup:/repos # Mount local repos (optional for remote storage)
     environment:
       - BACKREST_DATA=/data
       - BACKREST_CONFIG=/config/config.json
       - XDG_CACHE_HOME=/cache
       - TMPDIR=/tmp
-      - TZ=Asia/Kolkata
+      - TZ=${TZ:-Asia/Kolkata}
       - RESTIC_REPOSITORY=/backup/restic
       - RESTIC_PASSWORD=${RESTIC_PASSWORD}
     ports:
       - "9898:9898"
     restart: unless-stopped
     networks:
-      - homelab_net 
+      - homelab_net
     labels:
       - homepage.group=🛠 Infrastructure
       - homepage.name=Backrest
       - homepage.icon=restic.png
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:9898
       - homepage.description=Nightly Backups
 
   postgres:
@@ -403,66 +418,21 @@ services:
       retries: 5
       start_period: 20s
       test:
-      - CMD-SHELL
-      - pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}
+        - CMD-SHELL
+        - pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}
     volumes:
       - ./postgres/data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d
     networks:
       - homelab_net
 
-  # authentik-server:
-  #   image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG:-2026.5.3}
-  #   container_name: authentik-server
-  #   restart: unless-stopped
-  #   command: server
-  #   shm_size: 512mb
-  #   environment:
-  #     AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-CHANGE_ME_TO_A_LONG_RANDOM_STRING}
-  #     AUTHENTIK_POSTGRESQL__HOST: postgres
-  #     AUTHENTIK_POSTGRESQL__NAME: authentik
-  #     AUTHENTIK_POSTGRESQL__USER: postgres
-  #     AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS:-postgres}
-  #   ports:
-  #     - "9000:9000"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./authentik/server/data:/data
-  #     - ./authentik/server/custom-templates:/templates
-  #   networks:
-  #     - homelab_net
-
-  # authentik-worker:
-  #   image: ghcr.io/goauthentik/server:${AUTHENTIK_TAG:-2026.5.3}
-  #   container_name: authentik-worker
-  #   restart: unless-stopped
-  #   command: worker
-  #   shm_size: 512mb
-  #   environment:
-  #     AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-CHANGE_ME_TO_A_LONG_RANDOM_STRING}
-  #     AUTHENTIK_POSTGRESQL__HOST: postgres
-  #     AUTHENTIK_POSTGRESQL__NAME: authentik
-  #     AUTHENTIK_POSTGRESQL__USER: postgres
-  #     AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS:-postgres}
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock
-  #     - ./authentik/worker/data:/data
-  #     - ./authentik/worker/certs:/certs
-  #     - ./authentik/worker/custom-templates:/templates
-  #   networks:
-  #     - homelab_net
-
   linkwarden:
+    image: ghcr.io/linkwarden/linkwarden:v2.14.1
+    container_name: linkwarden
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://postgres:${PG_PASS:-postgres}@postgres:5432/linkwarden
     restart: always
-    image: ghcr.io/linkwarden/linkwarden:v2.14.1
     ports:
       - 3002:3000
     volumes:
@@ -476,11 +446,12 @@ services:
       - homepage.group=⬇️ Utility
       - homepage.name=LinkWarden
       - homepage.icon=linkwarden.png
-      - homepage.href=http://192.168.1.12:3002
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:3002
       - homepage.description=Bookmark
 
   meilisearch:
     image: getmeili/meilisearch:v1.12.8
+    container_name: meilisearch
     restart: always
     env_file:
       - .env
@@ -489,37 +460,13 @@ services:
     networks:
       - homelab_net
 
-  # calibre-web:
-  #   image: lscr.io/linuxserver/calibre-web:latest
-  #   container_name: calibre-web
-  #   environment:
-  #     - PUID=1000
-  #     - PGID=1000
-  #     - TZ=Etc/UTC
-  #     - DOCKER_MODS=linuxserver/mods:universal-calibre #optional
-  #     - OAUTHLIB_RELAX_TOKEN_SCOPE=1 #optional
-  #   volumes:
-  #     - ./calibre/web/data:/config
-  #     - ./calibre/library:/books
-  #   ports:
-  #     - 8083:8083
-  #   restart: unless-stopped
-  #   networks:
-  #     - homelab_net
-  #   labels:
-  #     - homepage.group=⬇️ Reading
-  #     - homepage.name=Calibre
-  #     - homepage.icon=calibre.png
-  #     - homepage.href=http://192.168.1.12:8083
-  #     - homepage.description=Reader
-
   calibre-web-automated:
     image: crocodilestick/calibre-web-automated:v4.0.6
     container_name: calibre-web-automated
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Asia/Kolkata
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Asia/Kolkata}
       # Hardcover API Key required for Hardcover as a Metadata Provider, get one here: https://docs.hardcover.app/api/getting-started/
       - HARDCOVER_TOKEN=${HARDCOVER_API_TOKEN}
     volumes:
@@ -537,23 +484,27 @@ services:
       - homepage.group=⬇️ Reading
       - homepage.name=Calibre
       - homepage.icon=calibre.png
-      - homepage.href=http://192.168.1.12:8083
+      - homepage.href=http://${LAN_IP:-192.168.1.12}:8083
       - homepage.description=Reader
 
   pocket-id:
     image: ghcr.io/pocket-id/pocket-id:v2
+    container_name: pocket-id
     restart: unless-stopped
     environment:
-      - PUID=1000
-      - PGID=1000
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - ENCRYPTION_KEY=${POCKETID_ENCRYPTION_KEY:-CHANGE_ME_TO_A_LONG_RANDOM_STRING}
-      - APP_URL=https://pocketid.codeasashu.in.eu.org
+      # WebAuthn/passkeys are bound to this exact origin — keep it on the owned
+      # domain so it survives Tailscale/Headscale renames. Changing it forces
+      # every passkey to be re-registered.
+      - APP_URL=https://pocketid.${PUBLIC_DOMAIN:-codeasashu.in.eu.org}
     ports:
       - 1411:1411
     volumes:
       - "./pocketid/data:/app/data"
     healthcheck:
-      test: [ "CMD", "/app/pocket-id", "healthcheck" ]
+      test: ["CMD", "/app/pocket-id", "healthcheck"]
       interval: 1m30s
       timeout: 5s
       retries: 2

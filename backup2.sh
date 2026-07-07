@@ -3,8 +3,18 @@
 set -Eeuo pipefail
 
 BACKUP_ROOT="/mnt/backup"
+HOMELAB_DIR="/home/ashutosh/homelab"
 DATE=$(date +"%Y-%m-%d")
 DB_BACKUP_DIR="$BACKUP_ROOT/db/$DATE"
+
+# Load secrets (DB passwords) from the same .env the stack uses — no hardcoding.
+if [ -f "$HOMELAB_DIR/.env" ]; then
+  set -a
+  . "$HOMELAB_DIR/.env"
+  set +a
+fi
+SEAFILE_ROOT_PW="${INIT_SEAFILE_MYSQL_ROOT_PASSWORD:-}"
+PG_PASS="${PG_PASS:-postgres}"
 
 log() {
 echo "[$(date '+%F %T')] $*"
@@ -39,9 +49,13 @@ log "Backing up Immich PostgreSQL"
 
 docker exec immich_postgres pg_dump -U postgres immich > "$DB_BACKUP_DIR/immich.sql"
 
-log "Backing up Seafile MySQL"
+log "Backing up Seafile MariaDB"
 
-docker exec seafile-mysql mysqldump -uroot -pdb_dev --all-databases > "$DB_BACKUP_DIR/seafile.sql"
+docker exec seafile-mysql mysqldump -uroot -p"$SEAFILE_ROOT_PW" --all-databases > "$DB_BACKUP_DIR/seafile.sql"
+
+log "Backing up shared PostgreSQL (Linkwarden etc.)"
+
+docker exec -e PGPASSWORD="$PG_PASS" postgres pg_dumpall -U postgres > "$DB_BACKUP_DIR/postgres.sql"
 
 ########################################
 
@@ -53,7 +67,7 @@ log "Backing up Navidrome"
 
 docker exec navidrome /app/navidrome backup create || true
 
-rsync -a --info=progress2 --delete /home/ashutosh/homelab/navidrome/backup/ "$BACKUP_ROOT/navidrome/backup/"
+rsync -a --info=progress2 --delete "$HOMELAB_DIR/navidrome/backup/" "$BACKUP_ROOT/navidrome/backup/"
 
 ########################################
 
@@ -68,10 +82,6 @@ rsync -a --delete /mnt/primary/immich/ "$BACKUP_ROOT/immich/"
 log "Backing up Seafile"
 
 rsync -a --delete /mnt/primary/seafile/ "$BACKUP_ROOT/seafile/"
-
-log "Backing up Radicale"
-
-rsync -a --delete /mnt/primary/radicale/ "$BACKUP_ROOT/radicale/"
 
 ########################################
 
@@ -95,15 +105,19 @@ rsync -a --delete /mnt/primary/Documents/ "$BACKUP_ROOT/Documents/"
 
 log "Backing up Docker Compose files"
 
-rsync -a --delete /home/ashutosh/homelab/ "$BACKUP_ROOT/homelab-config/"
+rsync -a --delete "$HOMELAB_DIR/" "$BACKUP_ROOT/homelab-config/"
 
-log "Backing up WireGuard"
+# System config — guarded so a missing path (e.g. Caddy lives on the VPS) does
+# not abort the whole run under `set -e`.
+if [ -d /etc/wireguard ]; then
+  log "Backing up WireGuard"
+  sudo rsync -a /etc/wireguard/ "$BACKUP_ROOT/system/wireguard/"
+fi
 
-sudo rsync -a /etc/wireguard/ "$BACKUP_ROOT/system/wireguard/"
-
-log "Backing up Caddy"
-
-sudo rsync -a /var/apps/docker/caddy/ "$BACKUP_ROOT/system/caddy/"
+if [ -d /var/apps/docker/caddy ]; then
+  log "Backing up Caddy"
+  sudo rsync -a /var/apps/docker/caddy/ "$BACKUP_ROOT/system/caddy/"
+fi
 
 ########################################
 

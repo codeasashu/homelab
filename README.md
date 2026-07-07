@@ -1,244 +1,158 @@
-# 🧰 Basic Homelab Setup
+# 🧰 Homelab
 
-This repository contains the complete configuration for a **self-hosted homelab** running on a Linux host using Docker Compose, with a **two-disk storage model** and **verified nightly backups**.
+Docker Compose configuration for a self-hosted homelab running on a single
+Linux host, with a **two-disk storage model**, **LAN-first access**, and
+**layered backups**.
 
-It provides:
-
-* Photo management (Immich)
-* Media streaming (Plex)
-* Personal cloud storage (Seafile)
-* Calendar & contacts (Radicale)
-* Reverse proxy (NGINX)
-* Full data redundancy via rsync-based backups
-
-The system is designed to be **safe against accidental data loss**, **power failures**, and **disk unplug events**.
+> This README is the intent/overview. The source of truth for what actually
+> runs is [`docker-compose.yml`](./docker-compose.yml); operational details are
+> in [`CLAUDE.md`](./CLAUDE.md).
 
 ---
 
-## 🧱 Architecture
+## 🖥 Host
 
-```
-                ┌──────────────────────┐
-                │   Linux Host OS       │
-                │  /home/myuser (SSD) │
-                └──────────┬───────────┘
-                           │
-                    docker-compose
-                           │
-        ┌──────────────────┴──────────────────┐
-        │                                     │
-┌───────▼────────┐                    ┌───────▼────────┐
-│ /mnt/primary   │                    │ /mnt/backup    │
-│ 2.5" HDD       │                    │ USB HDD        │
-│ (Live data)   │                    │ (Backups)     │
-└────────────────┘                    └────────────────┘
-```
-
-| Layer           | Purpose                   |
-| --------------- | ------------------------- |
-| **SSD**         | OS, Docker, configs, logs |
-| **Primary HDD** | All live service data     |
-| **Backup HDD**  | Nightly rsync mirror      |
+Toshiba Satellite C850 laptop, Ubuntu Server — 2 cores / 4 threads, **8 GB RAM**
+(the binding constraint), Intel HD 4000 iGPU passed to Jellyfin (`/dev/dri`) for
+hardware transcode. It runs ~20 containers, so be conservative adding services
+or raising memory / `shm_size`.
 
 ---
 
-## 💽 Disk Layout
+## 🌐 Access model
 
-Defined in `/etc/fstab`:
+The host has a **static LAN IP `192.168.1.12`** (router DHCP reservation).
 
-| Mount          | Purpose          | Options               |
-| -------------- | ---------------- | --------------------- |
-| `/`            | OS               | ext4                  |
-| `/mnt/primary` | All homelab data | ext4, noatime         |
-| `/mnt/backup`  | Backup drive     | ext4, noatime, nofail |
+- **Daily driver — LAN by IP:** `http://192.168.1.12:<port>`. Fastest path for
+  bandwidth-heavy use (Jellyfin, Immich) since the server is on the same LAN.
+- **Remote — Tailscale:** host-level Tailscale for occasional off-site access to
+  Immich / Seafile / Navidrome. No per-container VPN config.
+- **Canonical identity — owned domain `codeasashu.in.eu.org`:** used for
+  origin-bound services (pocket-id passkeys, Jellyfin, Seafile). Because the
+  domain is owned, it's stable across Tailscale/Headscale renames; point it at
+  the LAN IP / a VPS / Headscale via DNS without editing compose.
 
-The backup disk is allowed to be unplugged (`nofail`) without breaking boot.
+All host/identity values (`LAN_IP`, `PUBLIC_DOMAIN`, `TAILNET_SUFFIX`, `TZ`,
+`PUID`/`PGID`) are `.env` variables with defaults baked into compose — switching
+transport is a one-line `.env` edit, not a compose change.
+
+> Historical note: public access was previously fronted by an Oracle "always
+> free" VPS running Caddy over a WireGuard tunnel (see the `vps` branch and
+> `vps/`). That path is being retired in favour of Tailscale; the compose no
+> longer references the `10.66.66.2` tunnel IP.
+
+---
+
+## 💽 Storage
+
+Defined in [`fstab`](./fstab):
+
+| Mount          | Disk            | Holds                                   |
+| -------------- | --------------- | --------------------------------------- |
+| `/`            | NVMe SSD        | OS, Docker, this repo, container configs |
+| `/mnt/primary` | 1 TB 2.5" HDD   | All live service **data**               |
+| `/mnt/backup`  | USB HDD (`nofail`) | Backup target (safe to unplug)       |
+
+Data lives **outside containers** so a container/image change never risks it:
+- **config** → `./<svc>` on the SSD (bind-mounted into containers)
+- **bulk data** → `/mnt/primary/...`
 
 ---
 
 ## 🐳 Services
 
-All services run in a single Docker Compose stack:
+Single Compose stack on the `homelab_net` bridge (services reach each other by
+name). Public ports on the host:
 
-| Service    | Purpose          | Storage                          |
-| ---------- | ---------------- | -------------------------------- |
-| Immich     | Photo management | `/mnt/primary/immich`            |
-| PostgreSQL | Immich DB        | `/mnt/primary/immich/db`         |
-| Plex       | Media server     | `/mnt/primary/Movies`, `/Series` |
-| Seafile    | Personal cloud   | `/mnt/primary/seafile`           |
-| MariaDB    | Seafile DB       | `/mnt/primary/seafile/mysql`     |
-| Radicale   | CalDAV / CardDAV | `/mnt/primary/radicale`          |
-| Redis      | Immich cache     | ephemeral                        |
-| NGINX      | Reverse proxy    | SSD                              |
+| Service                 | Port  | Purpose                          |
+| ----------------------- | ----- | -------------------------------- |
+| Homepage                | 3000  | Dashboard                        |
+| Uptime-Kuma             | 3001  | Monitoring                       |
+| nginx                   | 80    | LAN reverse proxy (`*.homelab.lan`) |
+| Immich                  | 2283  | Photos (own Postgres + Redis)    |
+| Seafile                 | 8081  | Files/cloud (MariaDB)            |
+| Navidrome               | 4533  | Music                            |
+| Jellyfin                | 8096  | Movies / TV (HW transcode)       |
+| Sonarr                  | 8989  | TV automation                    |
+| Radarr                  | 7878  | Movie automation                 |
+| qBittorrent             | 8080  | Downloads                        |
+| Linkwarden              | 3002  | Bookmarks (shared Postgres + Meilisearch) |
+| Calibre-Web-Automated   | 8083  | E-books                          |
+| pocket-id               | 1411  | SSO / passkeys (OIDC)            |
+| Backrest                | 9898  | restic backups                   |
 
-Plex runs in `host` mode for DLNA and Chromecast compatibility.
+**Two separate Postgres instances** (don't confuse them):
+`immich_postgres` (pgvector, Immich only) and the generic `postgres`
+(16-alpine, shared by Linkwarden; DBs created via `./postgres/init`).
 
----
-
-## 📂 Directory Layout
-
-```
-/mnt/primary
-├── immich/
-│   ├── library
-│   └── db.sql
-├── seafile/
-│   ├── shared
-│   └── db.sql
-├── radicale/
-├── Movies/
-├── Series/
-└── torrents/
-```
-
-Backup mirrors the same structure under `/mnt/backup`.
+There is **no Plex** (Jellyfin replaced it) and **no Radicale**.
 
 ---
 
-## 🔁 Backup Strategy
+## ⚙️ Configuration
 
-A **nightly 3am cron job** performs a safe, atomic backup:
-
-### 1. Safety check
-
-Backup aborts unless the backup disk is mounted:
+- Copy [`.env.example`](./.env.example) → `.env` (gitignored) and fill in.
+  It documents every `${VAR}` the compose reads.
+- Start / operate:
 
 ```bash
-findmnt /mnt/backup || exit 1
-```
-
-This prevents rsync from writing to `/mnt/backup` when the USB disk is unplugged.
-
----
-
-### 2. Database dumps
-
-Databases are dumped live from containers:
-
-| App     | Command     |
-| ------- | ----------- |
-| Immich  | `pg_dump`   |
-| Seafile | `mysqldump` |
-
-They are written into `/mnt/primary` so they are also backed up.
-
----
-
-### 3. Rsync mirror
-
-Data is copied using:
-
-```
-rsync -avp
-```
-
-This preserves:
-
-* Ownership
-* Permissions
-* Timestamps
-* Symlinks
-
-Result:
-
-```
-/mnt/backup == complete mirror of /mnt/primary
-```
-
----
-
-## ⏰ Cron
-
-Runs daily at 03:00:
-
-```
-0 3 * * * /home/myuser/homelab/backup.sh >> /home/myuser/backup.log 2>&1
-```
-
-Logs allow forensic verification of every backup run.
-
----
-
-## 🛡 Data Safety Guarantees
-
-This system prevents all common failure modes:
-
-| Risk              | Protection                       |
-| ----------------- | -------------------------------- |
-| USB unplugged     | Backup aborts                    |
-| Power failure     | Journaling FS + idempotent rsync |
-| Corrupt DB        | Logical SQL dumps                |
-| Docker bug        | Data stored outside containers   |
-| Accidental delete | Backup mirror                    |
-
----
-
-## 🌐 Network
-
-All containers run on:
-
-```
-homelab_net (Docker bridge)
-```
-
-Plex uses host networking to allow DLNA discovery.
-
----
-
-## 🧠 Design Philosophy
-
-This homelab is designed like a **small system**:
-
-* **Stateless containers**
-* **Stateful volumes on real disks**
-* **Crash-safe backups**
-* **Mount-verified writes**
-* **No single point of silent failure**
-
-It behaves more like a NAS + application cluster than a hobby setup.
-
----
-
-## 🚀 Starting the stack
-
-From `/home/myuser/homelab`:
-
-```
 docker compose up -d
+docker compose logs -f <service>
+docker compose restart <service>
+docker compose config          # lint before bringing up
 ```
 
 ---
 
-## 🧪 Verify backup disk
+## 🔁 Backups (two layers)
+
+1. **Backrest** (container, port 9898) — restic repo at `/mnt/backup/restic`
+   (`RESTIC_PASSWORD`). Snapshots read-only mounts of Immich, Memories, Books,
+   docs, Seafile and the homelab config dir. Handles file-level app data,
+   dedup, and retention.
+
+2. **`backup2.sh`** (nightly cron) — the piece Backrest can't safely do:
+   **logical database dumps** (Immich `pg_dump`, Seafile `mysqldump`, shared
+   Postgres `pg_dumpall`, Navidrome dump) into `/mnt/backup/db/<date>/` with
+   30-day rotation, plus `rsync --delete` of Immich/Seafile/Photos/Documents and
+   the homelab config. Guards: aborts unless `/mnt/backup` is mounted **and**
+   writable. Secrets are read from `.env` (not hardcoded).
+
+> `backup.sh` (legacy rsync-only script) has been removed — superseded by the
+> two layers above.
+
+Example cron (verify the target before relying on it):
 
 ```
-findmnt /mnt/backup
+0 3 * * * /home/ashutosh/homelab/backup2.sh >> /home/ashutosh/backup.log 2>&1
 ```
 
-Must show a mounted filesystem before running backups.
+### Restore examples
+
+```bash
+# Immich DB (from a dated dump)
+docker exec -i immich_postgres psql -U postgres immich < /mnt/backup/db/<date>/immich.sql
+
+# Immich files
+rsync -a /mnt/backup/immich/ /mnt/primary/immich/
+```
 
 ---
 
-## 🧾 Restore example
+## 🗂 Git tracking
 
-Restore Immich photos:
-
-```
-rsync -av /mnt/backup/immich/ /mnt/primary/immich/
-```
-
-Restore database:
-
-```
-docker exec -i immich_postgres psql -U postgres immich < db.sql
-```
+Only source config is tracked (compose, `.env.example`, `nginx/conf.d/`,
+`postgres/init/`, `homepage/` YAML, `backup2.sh`, `fstab`, `smb.conf`). All
+service **runtime-state** dirs (databases, caches, sqlite, API-key configs,
+passkeys) are gitignored — see [`.gitignore`](./.gitignore). Bulk data on
+`/mnt/primary` is outside the repo entirely.
 
 ---
 
 ## 🏁 TODO
 
-* Wireguard Tunnel Setup
-* Disaster recovery
-
-* adding snapshotting (btrfs or zfs)
-* or off-site encrypted sync to cloud / another machine
+- Decommission the Oracle VPS / WireGuard tunnel once Tailscale (or Headscale)
+  fully covers remote access.
+- Reconcile Backrest's `RESTIC_REPOSITORY` (`/backup/restic`) with its volume
+  mount (`/mnt/backup:/repos`).
+- Snapshotting (btrfs/zfs) and/or off-site encrypted sync.
